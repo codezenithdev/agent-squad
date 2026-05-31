@@ -70,7 +70,13 @@ class AgentState(TypedDict, total=False):
     backend_spec: str
     db_schema: str
 
-    # Coder output: the implementation.
+    # Coder output.
+    # v2: the coder now writes a real multi-file project to disk. `workspace_dir`
+    # is the absolute path to that project, `files` is the relative-path manifest.
+    # `code` is kept as an optional short human summary (no longer the source of
+    # truth — the files on disk are).
+    workspace_dir: str
+    files: list[str]
     code: str
 
     # Bug detector output: starts with 'BUGS_FOUND:' or 'CLEAN:'.
@@ -132,6 +138,8 @@ def initial_state(user_input: str) -> AgentState:
         frontend_spec="",
         backend_spec="",
         db_schema="",
+        workspace_dir="",
+        files=[],
         code="",
         bug_report="",
         test_results="",

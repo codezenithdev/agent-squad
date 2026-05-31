@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
+from core.file_tools import read_workspace_digest
 from core.llm import complete
 from core.state import AgentState
 from core.tools import non_empty
@@ -32,7 +33,7 @@ async def bug_detector(state: AgentState) -> dict:
     user = (
         f"Frontend framework: {state.get('detected_frontend_framework', 'unknown')}\n"
         f"Backend framework: {state.get('detected_backend_framework', 'unknown')}\n\n"
-        f"Code to audit:\n{state.get('code', '')}"
+        f"Code to audit (files):\n{read_workspace_digest(state.get('workspace_dir', ''))}"
     )
     report = await complete("bug_detector", BUG_SYSTEM, user)
     non_empty(report, "bug_report")

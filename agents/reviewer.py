@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
+from core.file_tools import read_workspace_digest
 from core.llm import complete
 from core.state import AgentState
 from core.tools import non_empty
@@ -47,7 +48,7 @@ async def reviewer(state: AgentState) -> dict:
     user = (
         f"Requirement:\n{state['input']}\n\n"
         f"System design:\n{state.get('system_design', '')}\n\n"
-        f"Code:\n{state.get('code', '')}\n\n"
+        f"Code (files):\n{read_workspace_digest(state.get('workspace_dir', ''))}\n\n"
         f"Bug report:\n{state.get('bug_report', '')}\n\n"
         f"Test results:\n{state.get('test_results', '')}\n\n"
         "Give your verdict (APPROVE/REJECT on the first line) and notes."

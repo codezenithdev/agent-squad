@@ -92,7 +92,20 @@ def _assemble(state: AgentState, summary: str) -> str:
             "## 4. Frontend Specification\n\n" + state.get("frontend_spec", "").strip() + "\n",
             "## 5. Backend Specification\n\n" + state.get("backend_spec", "").strip() + "\n",
             "## 6. Database Schema\n\n" + state.get("db_schema", "").strip() + "\n",
-            "## 7. Implementation\n\n```\n" + state.get("code", "").strip() + "\n```\n",
+            (
+                "## 7. Implementation\n\n"
+                + (
+                    f"Generated project: `{state.get('workspace_dir', '')}`\n\n"
+                    if state.get("workspace_dir")
+                    else ""
+                )
+                + "Files:\n"
+                + (
+                    "\n".join(f"- `{f}`" for f in state.get("files", []))
+                    or "_no files generated_"
+                )
+                + "\n"
+            ),
             (
                 "## 8. Security Audit Summary\n\n"
                 f"- Bug-fix iterations run: {state.get('bug_iteration_count', 0)}\n"

@@ -16,11 +16,12 @@ from core.state import initial_state
 
 @pytest.fixture(autouse=True)
 def force_mock(monkeypatch):
-    monkeypatch.setattr(
-        llm_module,
-        "get_settings",
-        lambda: Settings(_env_file=None, use_mock_llm=True, max_iterations=3),
-    )
+    fake = lambda: Settings(_env_file=None, use_mock_llm=True, max_iterations=3)
+    monkeypatch.setattr(llm_module, "get_settings", fake)
+    # The coder's file-agent loop resolves settings independently.
+    import core.agent_loop as al
+
+    monkeypatch.setattr(al, "get_settings", fake)
 
 
 async def test_full_pipeline_mock():

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
+from core.file_tools import read_workspace_digest
 from core.llm import complete
 from core.state import AgentState
 from core.tools import non_empty
@@ -24,7 +25,7 @@ TESTER_SYSTEM = (
 async def tester(state: AgentState) -> dict:
     user = (
         f"Backend framework: {state.get('detected_backend_framework', 'unknown')}\n\n"
-        f"Code under test:\n{state.get('code', '')}"
+        f"Code under test (files):\n{read_workspace_digest(state.get('workspace_dir', ''))}"
     )
     results = await complete("tester", TESTER_SYSTEM, user)
     non_empty(results, "test_results")

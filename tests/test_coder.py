@@ -1,4 +1,4 @@
-"""The coder's stale-analysis reset — the bit that makes the fix-loops converge."""
+"""The coder writes real files (v2.0) and resets stale analyses on a re-run."""
 import pytest
 
 import core.llm as llm_module
@@ -12,11 +12,18 @@ def force_mock(monkeypatch):
     monkeypatch.setattr(
         llm_module, "get_settings", lambda: Settings(_env_file=None, use_mock_llm=True)
     )
+    # agent_loop reads get_settings via config.get_settings too; patch there as well.
+    import core.agent_loop as al
+
+    monkeypatch.setattr(
+        al, "get_settings", lambda: Settings(_env_file=None, use_mock_llm=True)
+    )
 
 
-async def test_first_run_sets_code_only():
-    out = await coder(initial_state("x"))  # code empty -> first run
-    assert out["code"].strip()
+async def test_first_run_writes_files():
+    out = await coder(initial_state("x"))  # no files yet -> first run
+    assert out["files"], "coder should write a non-empty file manifest"
+    assert out["workspace_dir"]
     # No stale-clear on the first run.
     assert "bug_report" not in out
     assert "review_decision" not in out
@@ -25,14 +32,15 @@ async def test_first_run_sets_code_only():
 async def test_rerun_clears_stale_analyses():
     s = initial_state("x")
     s.update(
-        code="old code",
+        files=["backend/main.py"],  # files present -> this is a re-run
+        workspace_dir="",
         bug_report="BUGS_FOUND: sqli",
         test_results="FAIL: t",
         review_decision="REJECT",
         review_notes="please fix",
     )
     out = await coder(s)
-    assert out["code"].strip()
+    assert out["files"]
     assert out["bug_report"] == ""
     assert out["test_results"] == ""
     assert out["review_decision"] is None

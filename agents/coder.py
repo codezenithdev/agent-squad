@@ -1,40 +1,38 @@
-"""The coder — generates and revises the implementation.
+"""The coder — writes a real, multi-file project to disk (v2.0).
 
-This agent runs in two modes:
-  * **First run** (``code`` is empty): generate the full implementation from the
-    design + specs + schema, using the detected frameworks for idiomatic output.
-  * **Re-run** (``code`` already exists): the supervisor sent us back because a
-    bug was found, a test failed, or the reviewer rejected. Incorporate that
-    feedback into the existing code.
+Before v2 the coder returned a single ``code`` string. Now it drives a
+tool-using agent (``core/agent_loop.run_file_agent``) that writes actual files
+into the run's workspace (``workspaces/{thread_id}/``) using write_file /
+read_file / list_files. Downstream agents read those files; the sandbox (v2.1)
+runs them.
 
-THE CRITICAL PART — stale-analysis reset:
-On a re-run the code *changes*, which means the previous ``bug_report``,
-``test_results``, and the reviewer's ``review_decision``/``review_notes`` now
-describe code that no longer exists. If we left them in place, the supervisor's
-rules would keep reacting to stale verdicts and either loop forever or skip
-re-verification. So a re-run clears all of them, forcing a fresh
-bug-scan -> test -> review pass over the new code. This is what makes the
-coder<->bug_detector and coder<->tester cycles actually work.
+Two modes (unchanged in spirit):
+  * **First run** (no files yet): generate the full project from the specs.
+  * **Re-run**: read the relevant files, apply the bug/test/review feedback, and
+    write them back. As before, a re-run clears the stale ``bug_report`` /
+    ``test_results`` / ``review_decision`` so the verifiers re-check fresh code.
 """
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from core.llm import complete
+from core.agent_loop import run_file_agent
+from core.file_tools import workspace_path
 from core.state import AgentState
 from core.tools import non_empty
 
 CODER_SYSTEM = (
-    "You are a senior full-stack engineer. Produce idiomatic, secure "
-    "implementation code for the specified stack: parameterized queries, proper "
-    "authentication/authorization checks, input validation, and error handling. "
-    "On a revision, address every piece of feedback precisely and return the "
-    "full updated implementation."
+    "You are a senior full-stack engineer. Write a complete, runnable project to "
+    "disk using the file tools (write_file, read_file, list_files). Produce "
+    "idiomatic, secure code for the specified stack: parameterized queries, auth "
+    "checks, input validation, error handling. Include a backend, a frontend, "
+    "tests, Dockerfiles, and a docker-compose.yml so the project can be built and "
+    "run. When revising, read the relevant files, fix every issue in the "
+    "feedback, and write the files back. Stop when the project is complete."
 )
 
 
 def _gather_feedback(state: AgentState) -> str:
-    """Collect any outstanding feedback to fold into a revision."""
     parts: list[str] = []
     bug_report = state.get("bug_report", "")
     if bug_report and "BUGS_FOUND" in bug_report:
@@ -47,8 +45,19 @@ def _gather_feedback(state: AgentState) -> str:
     return "\n\n".join(parts)
 
 
-async def coder(state: AgentState) -> dict:
-    is_rerun = bool(state.get("code"))
+def _workspace_for(state: AgentState, config) -> str:
+    """Reuse the workspace already on state, else derive it from the thread_id."""
+    if state.get("workspace_dir"):
+        return state["workspace_dir"]
+    thread_id = "run"
+    if isinstance(config, dict):
+        thread_id = (config.get("configurable") or {}).get("thread_id") or "run"
+    return str(workspace_path(thread_id))
+
+
+async def coder(state: AgentState, config=None) -> dict:
+    workspace_dir = _workspace_for(state, config)
+    is_rerun = bool(state.get("files"))
 
     base = (
         f"Frontend framework: {state.get('detected_frontend_framework', 'unknown')}\n"
@@ -61,21 +70,24 @@ async def coder(state: AgentState) -> dict:
     if is_rerun:
         user = (
             base
-            + "\n\nThis is a revision. Address the following feedback and return "
-            "the full updated implementation:\n\n"
+            + "\n\nThis is a revision. The current files are listed via list_files. "
+            "Read what you need, address the following feedback, and write the "
+            "updated files back:\n\n"
             + _gather_feedback(state)
         )
     else:
-        user = base + "\n\nGenerate the full initial implementation."
+        user = base + "\n\nWrite the full initial project to disk now."
 
-    code = await complete("coder", CODER_SYSTEM, user)
-    non_empty(code, "code")
+    files = await run_file_agent("coder", CODER_SYSTEM, user, workspace_dir)
+    non_empty(files, "files")
 
     updates: dict = {
-        "code": code,
+        "workspace_dir": workspace_dir,
+        "files": files,
+        "code": f"{len(files)} files written to {workspace_dir}",
         "messages": [
             AIMessage(
-                content=f"[coder] {'revised' if is_rerun else 'initial'} implementation",
+                content=f"[coder] {'revised' if is_rerun else 'wrote'} {len(files)} files",
                 name="coder",
             )
         ],
@@ -83,7 +95,6 @@ async def coder(state: AgentState) -> dict:
 
     if is_rerun:
         # The code changed -> prior analyses & the prior verdict are now stale.
-        # Clear them so the supervisor re-verifies the new code from scratch.
         updates["bug_report"] = ""
         updates["test_results"] = ""
         updates["review_decision"] = None
