@@ -2,7 +2,10 @@
 langgraph>=0.6.0
 langchain>=0.3.0
 langchain-core>=0.3.0
+
+# --- LLM providers (the system works with either) ---
 langchain-openai>=0.2.0
+langchain-anthropic>=0.2.0
 
 # --- Config & validation ---
 pydantic>=2.0.0

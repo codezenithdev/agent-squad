@@ -1,17 +1,20 @@
 """The LLM layer — the single spine every agent calls.
 
-One async function, ``complete(role, system, user)``, hides three concerns from
+One async function, ``complete(role, system, user)``, hides four concerns from
 the agents:
 
   1. **Mock vs real.** When ``settings.use_mock_llm`` is True it returns
-     deterministic, offline, free text. When False it calls real OpenAI.
-  2. **Model tiering.** The role decides the model: supervisor/reviewer get the
-     strong model, everyone else gets the cheap/fast one.
-  3. **Reliability.** Real calls are wrapped in tenacity retry with exponential
-     backoff, satisfying the spec's "retry on all OpenAI calls" constraint.
+     deterministic, offline, free text. When False it calls a real provider.
+  2. **Provider.** OpenAI *or* Anthropic (Claude), chosen by
+     ``settings.resolve_provider()``. We build the client with LangChain's
+     ``init_chat_model`` so there is no separate per-provider code path.
+  3. **Model tiering.** Each role maps to a "strong" tier (the reviewer) or a
+     "worker" tier (everyone else); each provider supplies the concrete names.
+  4. **Reliability.** Real calls are wrapped in tenacity retry with exponential
+     backoff.
 
-Because every agent goes through here, flipping one config flag switches the
-whole system between learning-mode and production-mode.
+Because every agent goes through here, flipping config switches the whole system
+between mock/real and OpenAI/Anthropic — the 11 agents never change.
 """
 from __future__ import annotations
 
@@ -25,17 +28,18 @@ from core.tools import truncate
 
 
 # ---------------------------------------------------------------------------
-# Model tiering
+# Provider + model tiering
 # ---------------------------------------------------------------------------
 
-def model_for_role(role: str) -> str:
-    """Map an agent role to its model tier (your spec's GPT-4o / mini split)."""
+def model_for_role(role: str) -> tuple[str, str]:
+    """Return ``(provider, model)`` for a role, honoring provider resolution and
+    the strong/worker tier split. The reviewer (and the never-LLM-calling
+    supervisor) get the strong tier; everyone else gets the worker tier."""
     s = get_settings()
-    if role == "supervisor":
-        return s.supervisor_model
-    if role == "reviewer":
-        return s.reviewer_model
-    return s.worker_model
+    provider = s.resolve_provider()
+    strong, worker = s.tier_models(provider)
+    model = strong if role in ("reviewer", "supervisor") else worker
+    return provider, model
 
 
 # ---------------------------------------------------------------------------
@@ -45,33 +49,51 @@ def model_for_role(role: str) -> str:
 async def complete(role: str, system: str, user: str, temperature: float = 0.3) -> str:
     """Return the model's text for a (system, user) prompt pair.
 
-    In mock mode this is instant and free; in real mode it calls OpenAI through
-    the retrying helper below.
+    In mock mode this is instant and free; in real mode it calls the resolved
+    provider through the retrying helper below.
     """
     settings = get_settings()
     if settings.use_mock_llm:
         return _mock_complete(role, user)
 
-    if not settings.openai_api_key:
+    provider = settings.resolve_provider()
+    if not settings.key_for(provider):
         raise RuntimeError(
-            "use_mock_llm is False but OPENAI_API_KEY is not set. "
-            "Add it to .env or set use_mock_llm=True for offline mode."
+            f"use_mock_llm is False and provider '{provider}' has no API key set. "
+            f"Set the matching key in .env (OPENAI_API_KEY / ANTHROPIC_API_KEY), "
+            f"choose a different LLM_PROVIDER, or set USE_MOCK_LLM=true."
         )
-    settings.apply_tracing_env()
+    settings.apply_provider_env()
     return await _complete_real(role, system, user, temperature)
 
 
 # ---------------------------------------------------------------------------
-# Real OpenAI path (with retry/backoff)
+# Real provider path (with retry/backoff)
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=8)
-def _get_chat_model(model: str, temperature: float):
-    """Cache one ChatOpenAI client per (model, temperature). Imported lazily so
-    mock mode never needs langchain_openai or an API key at import time."""
-    from langchain_openai import ChatOpenAI
+@lru_cache(maxsize=16)
+def _get_chat_model(provider: str, model: str, temperature: float):
+    """Cache one chat client per (provider, model, temperature). Imported lazily
+    via init_chat_model, which picks ChatOpenAI / ChatAnthropic for us."""
+    from langchain.chat_models import init_chat_model
 
-    return ChatOpenAI(model=model, temperature=temperature)
+    return init_chat_model(model, model_provider=provider, temperature=temperature)
+
+
+def _as_text(content) -> str:
+    """Normalize a message's content to a plain string. Anthropic can return a
+    list of content blocks; OpenAI returns a string. Handle both."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(block.get("text", ""))
+            else:
+                parts.append(getattr(block, "text", str(block)))
+        return "".join(parts)
+    return str(content)
 
 
 @retry(
@@ -80,24 +102,25 @@ def _get_chat_model(model: str, temperature: float):
     reraise=True,
 )
 async def _complete_real(role: str, system: str, user: str, temperature: float) -> str:
-    """Call OpenAI asynchronously. tenacity retries this up to 4 times with
-    exponential backoff (1s, 2s, 4s, ... capped at 30s) on transient errors."""
+    """Call the resolved provider asynchronously. tenacity retries this up to 4
+    times with exponential backoff (1s, 2s, 4s, ... capped at 30s)."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    chat = _get_chat_model(model_for_role(role), temperature)
+    provider, model = model_for_role(role)
+    chat = _get_chat_model(provider, model, temperature)
     response = await chat.ainvoke(
         [SystemMessage(content=system), HumanMessage(content=user)]
     )
-    return response.content
+    return _as_text(response.content)
 
 
 # ---------------------------------------------------------------------------
 # Mock path (deterministic, scripted)
 # ---------------------------------------------------------------------------
 # Some roles vary their answer by call number so we can demonstrate the fix
-# loops in Phase 5: the bug detector finds bugs the *first* time then reports
-# clean; the tester fails the *first* time then passes. A per-role counter
-# drives that. Call reset_mock() between independent runs.
+# loops: the bug detector finds bugs the *first* time then reports clean; the
+# tester fails the *first* time then passes. A per-role counter drives that.
+# Call reset_mock() between independent runs.
 
 _mock_calls: dict[str, int] = defaultdict(int)
 
@@ -230,11 +253,14 @@ if __name__ == "__main__":
 
     async def demo() -> None:
         s = get_settings()
-        print(f"use_mock_llm = {s.use_mock_llm}\n")
+        provider = s.resolve_provider()
+        print(f"use_mock_llm = {s.use_mock_llm} | llm_provider = {s.llm_provider} "
+              f"-> resolved: {provider}\n")
 
-        print("Model tiering (role -> model):")
-        for role in ["supervisor", "reviewer", "planner", "coder", "frontend"]:
-            print(f"  {role:12} -> {model_for_role(role)}")
+        print("Provider + model tiering (role -> provider:model):")
+        for role in ["reviewer", "planner", "coder", "frontend"]:
+            p, m = model_for_role(role)
+            print(f"  {role:10} -> {p}:{m}")
 
         print("\nplanner mock output:")
         out = await complete("planner", "You are a planner.", "Build a job board")
