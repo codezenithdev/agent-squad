@@ -1,6 +1,37 @@
-.venv
+# --- Secrets / environment ---------------------------------------------------
+# NEVER commit your real .env (it holds your OpenAI key). Only .env.example is
+# tracked. The negation re-includes the template even though .env.* is ignored.
 .env
+.env.*
+!.env.example
 
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
 
-__pycache__
-graphify-out
+# --- Virtual environments ----------------------------------------------------
+.venv/
+venv/
+env/
+
+# --- Tooling caches ----------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Generated artifacts -----------------------------------------------------
+# output.md is produced by `python test_run.py`; regenerate it, don't commit it.
+output.md
+
+# --- Editors / OS ------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- graphify ----------------------------------------------------------------
+graphify-out/
