@@ -20,39 +20,9 @@ test-fix loops along the way.
 ## Architecture
 
 One **supervisor** sits at the center. After every agent finishes, control
-returns to the supervisor, which looks at the shared state and decides who runs
-next — until the work is done.
-
-```mermaid
-flowchart TD
-    START([START]) --> SUP{{SUPERVISOR<br/>deterministic router}}
-
-    SUP -->|1. task_graph empty| PL[planner]
-    SUP -->|2. system_design empty| AR[architect]
-    SUP -->|3. frontend_spec empty| FE[frontend · detects framework]
-    SUP -->|4. backend_spec empty| BE[backend · detects framework]
-    SUP -->|5. db_schema empty| DB[database]
-    SUP -->|6. code empty / REJECT| CO[coder]
-    SUP -->|7. scan code| BD[bug_detector]
-    SUP -->|9. run tests| TE[tester]
-    SUP -->|11. review| RV[reviewer]
-    SUP -->|12. APPROVE| AG[aggregator]
-    SUP -->|13. done| FIN([END])
-
-    PL --> SUP
-    AR --> SUP
-    FE --> SUP
-    BE --> SUP
-    DB --> SUP
-    CO --> SUP
-    BD --> SUP
-    TE --> SUP
-    RV --> SUP
-    AG --> SUP
-```
-
-Every worker has a plain edge back to the supervisor. The **fix-loops** are the
-supervisor re-routing to the `coder`:
+returns to the supervisor, which inspects the shared state and decides who runs
+next — until the work is done. Every worker has a plain edge back to the
+supervisor; the **fix-loops** are the supervisor re-routing to the `coder`:
 
 - `bug_detector` reports `BUGS_FOUND` → supervisor sends control back to `coder`
 - `tester` reports `FAIL` → back to `coder`
@@ -206,10 +176,4 @@ All settings load from environment / `.env` via `config.py`:
 ## Tech stack
 
 LangGraph · LangChain · langchain-openai · Pydantic / pydantic-settings ·
-FastAPI · Uvicorn · Tenacity · LangSmith (optional).
-
-## License
-
-**TBD.** No license has been chosen yet — note that a public repository without
-a license is, by default, *not* legally reusable by others. Adding one (e.g.
-MIT) is a single-file drop-in whenever you decide.
+FastAPI · Uvicorn · Tenacity · LangSmith.
