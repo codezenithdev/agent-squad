@@ -84,6 +84,14 @@ def decide_route(state: AgentState) -> tuple[str, dict]:
         if "FAIL" in test_results and iteration < max_i:
             return "coder", {"iteration_count": iteration + 1}
 
+    # --- Safety net: never review without any test signal -----------------
+    # If the bug-fix budget is spent before the tester gets a turn, the breaker
+    # above skips rules 7-10 entirely. Give the tester one run so the review and
+    # the final document always reflect a real test result. This cannot loop:
+    # rule 10 (FAIL -> coder) is gated by `not breaker`.
+    if not test_results and code:
+        return "tester", {}
+
     # --- Rule 11: holistic review -----------------------------------------
     if not review_notes_done:
         return "reviewer", {}

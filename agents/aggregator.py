@@ -57,6 +57,17 @@ def _deployment_notes(fe: str, be: str) -> str:
     )
 
 
+def _or_note(value: str, note: str) -> str:
+    """Return the stripped value, or an explanatory note if it's empty.
+
+    The verify/fix loop can end with ``bug_report``/``test_results`` cleared (the
+    coder wipes them on its last revision, then the circuit breaker routes past
+    the verifiers). Rather than print a blank line, we explain why.
+    """
+    value = (value or "").strip()
+    return value if value else f"_{note}_"
+
+
 def _assemble(state: AgentState, summary: str) -> str:
     fe = state.get("detected_frontend_framework", "unknown")
     be = state.get("detected_backend_framework", "unknown")
@@ -85,12 +96,24 @@ def _assemble(state: AgentState, summary: str) -> str:
             (
                 "## 8. Security Audit Summary\n\n"
                 f"- Bug-fix iterations run: {state.get('bug_iteration_count', 0)}\n"
-                f"- Final scan: {state.get('bug_report', '').strip()}\n"
+                "- Final scan: "
+                + _or_note(
+                    state.get("bug_report", ""),
+                    "no final scan recorded — code was revised to the "
+                    "circuit-breaker limit; see review notes",
+                )
+                + "\n"
             ),
             (
                 "## 9. Test Plan\n\n"
                 f"- Test-fix iterations run: {state.get('iteration_count', 0)}\n"
-                f"- Final result: {state.get('test_results', '').strip()}\n"
+                "- Final result: "
+                + _or_note(
+                    state.get("test_results", ""),
+                    "no test run recorded — code was revised to the "
+                    "circuit-breaker limit; see review notes",
+                )
+                + "\n"
             ),
             "## 10. Deployment Notes\n\n" + _deployment_notes(fe, be) + "\n",
             (
