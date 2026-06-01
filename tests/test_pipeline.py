@@ -18,10 +18,13 @@ from core.state import initial_state
 def force_mock(monkeypatch):
     fake = lambda: Settings(_env_file=None, use_mock_llm=True, max_iterations=3)
     monkeypatch.setattr(llm_module, "get_settings", fake)
-    # The coder's file-agent loop resolves settings independently.
+    # Modules that independently resolve settings to choose mock vs real paths.
+    import agents.bug_detector as bd
+    import agents.tester as te
     import core.agent_loop as al
 
-    monkeypatch.setattr(al, "get_settings", fake)
+    for mod in (al, te, bd):
+        monkeypatch.setattr(mod, "get_settings", fake)
 
 
 async def test_full_pipeline_mock():

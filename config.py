@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     # --- Iteration / circuit-breaker limit ---------------------------------
     max_iterations: int = 3
 
+    # --- Execution sandbox (v2.1) ------------------------------------------
+    # Generated code is run ONLY inside throwaway Docker containers, never on the
+    # host. These bound each container run.
+    sandbox_python_image: str = "python:3.11-slim"
+    sandbox_node_image: str = "node:20-slim"
+    sandbox_timeout: int = 300  # seconds per sandbox command
+    sandbox_memory: str = "1g"
+    sandbox_cpus: str = "2"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
