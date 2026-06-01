@@ -22,8 +22,10 @@ from core.tools import FRONTEND_KEYWORDS, detect_framework, non_empty
 FRONTEND_SYSTEM = (
     "You are a senior frontend architect. Produce a frontend specification that "
     "is SPECIFIC to the named framework — use its real conventions, never "
-    "generic advice. Cover exactly three sections: (1) component tree, "
-    "(2) routing strategy, (3) state management approach."
+    "generic advice. If web search is available, look up the framework's latest "
+    "official docs/conventions first so the spec reflects current best practice. "
+    "Cover exactly three sections: (1) component tree, (2) routing strategy, "
+    "(3) state management approach."
 )
 
 # When detection fails, this is the framework we assume (and disclose).
@@ -48,7 +50,7 @@ async def frontend(state: AgentState) -> dict:
         f"System design:\n{state.get('system_design', '')}\n\n"
         f"Produce the {framework} frontend spec (component tree, routing, state)."
     )
-    spec = await complete("frontend", FRONTEND_SYSTEM, user)
+    spec = await complete("frontend", FRONTEND_SYSTEM, user, web_search=True)
     spec = assumption + spec
     non_empty(spec, "frontend_spec")
 

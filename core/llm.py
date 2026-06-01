@@ -52,12 +52,16 @@ async def complete(
     user: str,
     temperature: float = 0.3,
     cache_prefix: str = "",
+    web_search: bool = False,
 ) -> str:
     """Return the model's text for a prompt.
 
     ``cache_prefix`` is large, stable context (specs, design, a code digest) that
     repeats across calls. It's placed in a cacheable prefix so repeated calls are
     cheap (Anthropic prompt caching; OpenAI auto-caches stable prefixes).
+
+    ``web_search`` lets the model fetch current docs via Claude's server-side
+    web search tool. It only applies on the Anthropic provider (no-op otherwise).
 
     In mock mode this is instant and free.
     """
@@ -73,7 +77,7 @@ async def complete(
             f"choose a different LLM_PROVIDER, or set USE_MOCK_LLM=true."
         )
     settings.apply_provider_env()
-    return await _complete_real(role, system, user, temperature, cache_prefix)
+    return await _complete_real(role, system, user, temperature, cache_prefix, web_search)
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +91,17 @@ def _get_chat_model(provider: str, model: str, temperature: float):
     from langchain.chat_models import init_chat_model
 
     return init_chat_model(model, model_provider=provider, temperature=temperature)
+
+
+def web_search_tool() -> dict:
+    """Anthropic server-side web search tool definition. Bind it and Claude runs
+    the searches itself (no client-side execution), returning a cited answer."""
+    s = get_settings()
+    return {
+        "type": s.web_search_tool_type,
+        "name": "web_search",
+        "max_uses": s.web_search_max_uses,
+    }
 
 
 def _as_text(content) -> str:
@@ -160,12 +175,20 @@ def record_usage(response) -> None:
     reraise=True,
 )
 async def _complete_real(
-    role: str, system: str, user: str, temperature: float, cache_prefix: str = ""
+    role: str,
+    system: str,
+    user: str,
+    temperature: float,
+    cache_prefix: str = "",
+    web_search: bool = False,
 ) -> str:
     """Call the resolved provider asynchronously. tenacity retries this up to 4
     times with exponential backoff (1s, 2s, 4s, ... capped at 30s)."""
     provider, model = model_for_role(role)
     chat = _get_chat_model(provider, model, temperature)
+    # Web search is an Anthropic server-side tool; bind it only there.
+    if web_search and provider == "anthropic" and get_settings().enable_web_search:
+        chat = chat.bind_tools([web_search_tool()])
     response = await chat.ainvoke(_build_messages(provider, system, user, cache_prefix))
     record_usage(response)
     return _as_text(response.content)

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from config import get_settings
 from core.file_tools import list_workspace_files, make_file_tools
-from core.llm import _get_chat_model, model_for_role, record_usage
+from core.llm import _get_chat_model, model_for_role, record_usage, web_search_tool
 
 
 async def run_file_agent(
@@ -38,7 +38,13 @@ async def run_file_agent(
     tools = make_file_tools(workspace_dir)
     tools_by_name = {t.name: t for t in tools}
     provider, model = model_for_role(role)
-    chat = _get_chat_model(provider, model, 0.2).bind_tools(tools)
+    # File tools are client-side (we execute them in the loop). On Anthropic we
+    # also bind the server-side web search tool so the coder can look up current
+    # framework APIs; Anthropic resolves those searches itself (no loop entry).
+    bind_list = list(tools)
+    if provider == "anthropic" and settings.enable_web_search:
+        bind_list.append(web_search_tool())
+    chat = _get_chat_model(provider, model, 0.2).bind_tools(bind_list)
 
     # Anthropic: cache the system + initial instruction so each subsequent loop
     # step (which re-sends the whole growing conversation) only pays for the

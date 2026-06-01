@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     # --- Iteration / circuit-breaker limit ---------------------------------
     max_iterations: int = 3
 
+    # --- Web search (v2.4) -------------------------------------------------
+    # Claude's server-side web search tool lets agents fetch current framework
+    # docs before generating. Active only on the Anthropic provider; no-op on
+    # OpenAI. Toggle off to disable; tune how many searches per call.
+    enable_web_search: bool = True
+    web_search_tool_type: str = "web_search_20250305"
+    web_search_max_uses: int = 3
+
     # --- Execution sandbox (v2.1) ------------------------------------------
     # Generated code is run ONLY inside throwaway Docker containers, never on the
     # host. These bound each container run.

@@ -20,8 +20,10 @@ from core.tools import BACKEND_KEYWORDS, detect_framework, non_empty
 BACKEND_SYSTEM = (
     "You are a senior backend architect. Produce a backend specification that "
     "is SPECIFIC to the named framework — use its real idioms, never generic "
-    "advice. Cover exactly three sections: (1) API contracts/routes, (2) load "
-    "balancing & scaling, (3) infrastructure & deployment patterns."
+    "advice. If web search is available, look up the framework's latest official "
+    "docs/conventions first so the spec reflects current best practice. Cover "
+    "exactly three sections: (1) API contracts/routes, (2) load balancing & "
+    "scaling, (3) infrastructure & deployment patterns."
 )
 
 # Per spec: unknown backend defaults to FastAPI.
@@ -46,7 +48,7 @@ async def backend(state: AgentState) -> dict:
         f"System design:\n{state.get('system_design', '')}\n\n"
         f"Produce the {framework} backend spec (API contracts, load balancing, infra)."
     )
-    spec = await complete("backend", BACKEND_SYSTEM, user)
+    spec = await complete("backend", BACKEND_SYSTEM, user, web_search=True)
     spec = assumption + spec
     non_empty(spec, "backend_spec")
 
