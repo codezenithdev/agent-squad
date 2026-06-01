@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from config import get_settings
 from core.file_tools import list_workspace_files, make_file_tools
-from core.llm import _get_chat_model, model_for_role
+from core.llm import _get_chat_model, model_for_role, record_usage
 
 
 async def run_file_agent(
@@ -40,9 +40,21 @@ async def run_file_agent(
     provider, model = model_for_role(role)
     chat = _get_chat_model(provider, model, 0.2).bind_tools(tools)
 
-    messages = [SystemMessage(content=system), HumanMessage(content=user)]
+    # Anthropic: cache the system + initial instruction so each subsequent loop
+    # step (which re-sends the whole growing conversation) only pays for the
+    # cached prefix. This is the biggest caching win in the system.
+    if provider == "anthropic":
+        ephemeral = {"cache_control": {"type": "ephemeral"}}
+        messages = [
+            SystemMessage(content=[{"type": "text", "text": system, **ephemeral}]),
+            HumanMessage(content=[{"type": "text", "text": user, **ephemeral}]),
+        ]
+    else:
+        messages = [SystemMessage(content=system), HumanMessage(content=user)]
+
     for _ in range(max_steps):
         ai = await chat.ainvoke(messages)
+        record_usage(ai)
         messages.append(ai)
         tool_calls = getattr(ai, "tool_calls", None) or []
         if not tool_calls:

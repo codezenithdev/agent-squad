@@ -99,16 +99,39 @@ class Settings(BaseSettings):
             os.environ["LANGCHAIN_TRACING_V2"] = "true"
             os.environ["LANGCHAIN_API_KEY"] = self.langchain_api_key
             os.environ["LANGCHAIN_PROJECT"] = self.langchain_project
+        # Overwrite (not setdefault): an ambient EMPTY key var must not win.
         if self.openai_api_key:
-            os.environ.setdefault("OPENAI_API_KEY", self.openai_api_key)
+            os.environ["OPENAI_API_KEY"] = self.openai_api_key
         if self.anthropic_api_key:
-            os.environ.setdefault("ANTHROPIC_API_KEY", self.anthropic_api_key)
+            os.environ["ANTHROPIC_API_KEY"] = self.anthropic_api_key
+
+    def recover_keys_from_dotenv(self) -> None:
+        """Recover API keys from the .env file when an ambient EMPTY env var
+        (e.g. a shell with ``ANTHROPIC_API_KEY=``) shadows the file value in
+        pydantic's precedence order. Only fills keys that came back empty.
+
+        Called by ``get_settings()`` (the app path); tests that construct
+        ``Settings(_env_file=None, ...)`` directly skip it and stay hermetic."""
+        if self.openai_api_key and self.anthropic_api_key:
+            return
+        try:
+            from dotenv import dotenv_values
+
+            vals = dotenv_values(self.model_config.get("env_file", ".env"))
+        except Exception:
+            vals = {}
+        if not self.openai_api_key and vals.get("OPENAI_API_KEY"):
+            self.openai_api_key = vals["OPENAI_API_KEY"]
+        if not self.anthropic_api_key and vals.get("ANTHROPIC_API_KEY"):
+            self.anthropic_api_key = vals["ANTHROPIC_API_KEY"]
 
 
 @lru_cache
 def get_settings() -> Settings:
     """Cached accessor so the environment is parsed exactly once per process."""
-    return Settings()
+    settings = Settings()
+    settings.recover_keys_from_dotenv()  # un-shadow keys hidden by empty env vars
+    return settings
 
 
 if __name__ == "__main__":

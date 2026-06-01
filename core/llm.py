@@ -46,11 +46,20 @@ def model_for_role(role: str) -> tuple[str, str]:
 # Public API
 # ---------------------------------------------------------------------------
 
-async def complete(role: str, system: str, user: str, temperature: float = 0.3) -> str:
-    """Return the model's text for a (system, user) prompt pair.
+async def complete(
+    role: str,
+    system: str,
+    user: str,
+    temperature: float = 0.3,
+    cache_prefix: str = "",
+) -> str:
+    """Return the model's text for a prompt.
 
-    In mock mode this is instant and free; in real mode it calls the resolved
-    provider through the retrying helper below.
+    ``cache_prefix`` is large, stable context (specs, design, a code digest) that
+    repeats across calls. It's placed in a cacheable prefix so repeated calls are
+    cheap (Anthropic prompt caching; OpenAI auto-caches stable prefixes).
+
+    In mock mode this is instant and free.
     """
     settings = get_settings()
     if settings.use_mock_llm:
@@ -64,7 +73,7 @@ async def complete(role: str, system: str, user: str, temperature: float = 0.3) 
             f"choose a different LLM_PROVIDER, or set USE_MOCK_LLM=true."
         )
     settings.apply_provider_env()
-    return await _complete_real(role, system, user, temperature)
+    return await _complete_real(role, system, user, temperature, cache_prefix)
 
 
 # ---------------------------------------------------------------------------
@@ -96,21 +105,69 @@ def _as_text(content) -> str:
     return str(content)
 
 
+# ---------------------------------------------------------------------------
+# Prompt assembly + caching (v2.2)
+# ---------------------------------------------------------------------------
+# Anthropic prompt caching: mark a stable prefix block with
+# cache_control={"type": "ephemeral"} and Anthropic caches everything up to it,
+# so repeated calls sharing that prefix pay only ~10% for the cached tokens.
+# OpenAI auto-caches identical prefixes, so we just keep stable content at the
+# front. Caching only kicks in above the provider's minimum prefix size
+# (~1024 tokens), so it helps the big-context calls, not the tiny prompts.
+
+def _build_messages(provider: str, system: str, user: str, cache_prefix: str):
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    if provider == "anthropic":
+        blocks = [{"type": "text", "text": system}]
+        if cache_prefix:
+            blocks.append({"type": "text", "text": cache_prefix})
+        # Cache everything up to & including the last system block.
+        blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
+        return [SystemMessage(content=blocks), HumanMessage(content=user)]
+
+    # OpenAI / others: keep the stable context at the front (auto-cached).
+    user_text = f"{cache_prefix}\n\n{user}" if cache_prefix else user
+    return [SystemMessage(content=system), HumanMessage(content=user_text)]
+
+
+# Running token tally so caching savings are observable.
+_usage = {"calls": 0, "input": 0, "output": 0, "cache_read": 0, "cache_creation": 0}
+
+
+def reset_usage() -> None:
+    for key in _usage:
+        _usage[key] = 0
+
+
+def usage_summary() -> dict:
+    return dict(_usage)
+
+
+def record_usage(response) -> None:
+    meta = getattr(response, "usage_metadata", None) or {}
+    _usage["calls"] += 1
+    _usage["input"] += meta.get("input_tokens", 0) or 0
+    _usage["output"] += meta.get("output_tokens", 0) or 0
+    details = meta.get("input_token_details", {}) or {}
+    _usage["cache_read"] += details.get("cache_read", 0) or 0
+    _usage["cache_creation"] += details.get("cache_creation", 0) or 0
+
+
 @retry(
     stop=stop_after_attempt(4),
     wait=wait_exponential(multiplier=1, min=1, max=30),
     reraise=True,
 )
-async def _complete_real(role: str, system: str, user: str, temperature: float) -> str:
+async def _complete_real(
+    role: str, system: str, user: str, temperature: float, cache_prefix: str = ""
+) -> str:
     """Call the resolved provider asynchronously. tenacity retries this up to 4
     times with exponential backoff (1s, 2s, 4s, ... capped at 30s)."""
-    from langchain_core.messages import HumanMessage, SystemMessage
-
     provider, model = model_for_role(role)
     chat = _get_chat_model(provider, model, temperature)
-    response = await chat.ainvoke(
-        [SystemMessage(content=system), HumanMessage(content=user)]
-    )
+    response = await chat.ainvoke(_build_messages(provider, system, user, cache_prefix))
+    record_usage(response)
     return _as_text(response.content)
 
 

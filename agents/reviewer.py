@@ -45,15 +45,21 @@ def _parse_review(raw: str) -> tuple[str, str]:
 
 
 async def reviewer(state: AgentState) -> dict:
-    user = (
+    # Stable, large context -> cacheable prefix; the variable verdict inputs
+    # (bug report, test results) + instruction stay in the per-call message.
+    cache_prefix = (
         f"Requirement:\n{state['input']}\n\n"
         f"System design:\n{state.get('system_design', '')}\n\n"
-        f"Code (files):\n{read_workspace_digest(state.get('workspace_dir', ''))}\n\n"
+        f"Code (files):\n{read_workspace_digest(state.get('workspace_dir', ''))}"
+    )
+    user = (
         f"Bug report:\n{state.get('bug_report', '')}\n\n"
         f"Test results:\n{state.get('test_results', '')}\n\n"
         "Give your verdict (APPROVE/REJECT on the first line) and notes."
     )
-    raw = await complete("reviewer", REVIEWER_SYSTEM, user, temperature=0.1)
+    raw = await complete(
+        "reviewer", REVIEWER_SYSTEM, user, temperature=0.1, cache_prefix=cache_prefix
+    )
     decision, notes = _parse_review(raw)
     non_empty(decision, "review_decision")
 

@@ -16,8 +16,11 @@ Then open the interactive docs at http://localhost:8000/docs
 """
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from config import get_settings
@@ -54,6 +57,68 @@ def _frameworks(state: dict) -> dict:
         "frontend": state.get("detected_frontend_framework", ""),
         "backend": state.get("detected_backend_framework", ""),
     }
+
+
+def _describe(node: str, update: dict) -> str:
+    """One-line summary of what a node just did (for the live stream)."""
+    if node == "supervisor":
+        return f"routing to {update.get('next')}"
+    if node == "bug_detector":
+        line = (update.get("bug_report") or "").splitlines()
+        return line[0] if line else "scanned"
+    if node == "tester":
+        line = (update.get("test_results") or "").splitlines()
+        return line[0] if line else "tested"
+    if node == "reviewer":
+        return f"verdict: {update.get('review_decision')}"
+    if node == "coder":
+        return (
+            f"wrote {len(update.get('files', []))} files"
+            if update.get("files")
+            else "updated code"
+        )
+    if node == "aggregator":
+        return "compiled final document"
+    return "produced " + ", ".join(k for k in update if k != "messages")
+
+
+async def _sse_stream(requirement: str, thread_id: str):
+    """Yield Server-Sent Events: one per agent step, then a final 'done' event."""
+    reset_mock()
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
+    step = 0
+    async for chunk in graph.astream(
+        initial_state(requirement), config, stream_mode="updates"
+    ):
+        for node, update in chunk.items():
+            step += 1
+            payload = {
+                "type": "step",
+                "step": step,
+                "node": node,
+                "summary": _describe(node, update),
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+
+    state = (await graph.aget_state(config)).values
+    done = {
+        "type": "done",
+        "steps": step,
+        "frameworks_detected": _frameworks(state),
+        "review_decision": state.get("review_decision"),
+        "final_document": state.get("final_document", ""),
+    }
+    yield f"data: {json.dumps(done)}\n\n"
+
+
+@app.post("/run/stream")
+async def run_stream(req: RunRequest):
+    """Stream each agent step live as Server-Sent Events (text/event-stream)."""
+    return StreamingResponse(
+        _sse_stream(req.requirement, req.thread_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/")
