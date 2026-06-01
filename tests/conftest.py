@@ -10,7 +10,9 @@ from core.llm import reset_mock, reset_usage
 
 
 @pytest.fixture(autouse=True)
-def _isolate():
+def _isolate(monkeypatch):
+    # Disable git side effects during tests (test_git_ops exercises git directly).
+    monkeypatch.setenv("ENABLE_GIT", "false")
     reset_mock()
     reset_usage()
     get_settings.cache_clear()

@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # --- Iteration / circuit-breaker limit ---------------------------------
     max_iterations: int = 3
 
+    # --- Git integration (v2.5) --------------------------------------------
+    # The aggregator commits the generated workspace to a branch (local only).
+    enable_git: bool = True
+    git_author_name: str = "Multi-Agent Architect"
+    git_author_email: str = "agent@multi-agent-architect.local"
+
     # --- Web search (v2.4) -------------------------------------------------
     # Claude's server-side web search tool lets agents fetch current framework
     # docs before generating. Active only on the Anthropic provider; no-op on

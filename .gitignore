@@ -28,6 +28,9 @@ env/
 output.md
 # v2: generated multi-file projects written by the coder agent.
 workspaces/
+# v2.6: generated eval reports.
+evals/report.md
+evals/report.json
 
 # --- Editors / OS ------------------------------------------------------------
 .vscode/

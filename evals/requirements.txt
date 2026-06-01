@@ -1,0 +1,8 @@
+# Eval requirements — one per line. Blank lines and # comments are ignored.
+# Each is run --runs times; metrics are aggregated per requirement and overall.
+Design a scalable job board with Next.js frontend, FastAPI backend, PostgreSQL, user auth, job listings with search, and an employer dashboard
+Build a todo app with a SvelteKit frontend and an Express backend with SQLite
+Create a blog platform with a Nuxt frontend and a Django backend with PostgreSQL
+Build a URL shortener with a React frontend and a FastAPI backend with Redis
+Design an e-commerce product catalog with an Angular frontend and a NestJS backend
+Build a real-time chat app with a Next.js frontend and a FastAPI websocket backend

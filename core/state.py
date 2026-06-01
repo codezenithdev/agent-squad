@@ -92,6 +92,10 @@ class AgentState(TypedDict, total=False):
     # Aggregator output: the final markdown deliverable.
     final_document: str
 
+    # v2.5 git: the branch the generated workspace was committed to + the PR body.
+    branch_name: str
+    pr_body: str
+
     # --- Loop counters (circuit breakers) ---
     iteration_count: int       # Tester  -> Coder cycles (max == max_iterations)
     bug_iteration_count: int   # BugDetector -> Coder cycles (max == max_iterations)
@@ -146,6 +150,8 @@ def initial_state(user_input: str) -> AgentState:
         review_decision=None,
         review_notes="",
         final_document="",
+        branch_name="",
+        pr_body="",
         iteration_count=0,
         bug_iteration_count=0,
         next="",

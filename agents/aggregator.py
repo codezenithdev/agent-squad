@@ -13,11 +13,16 @@ Sections (per spec): 1 Executive summary, 2 Detected stack, 3 Architecture,
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from langchain_core.messages import AIMessage
 
+from config import get_settings
+from core.git_ops import commit_workspace
 from core.llm import complete
 from core.state import AgentState
-from core.tools import non_empty
+from core.tools import non_empty, truncate
 
 AGGREGATOR_SYSTEM = (
     "You are a technical writer. Write a concise executive summary (3-5 "
@@ -138,6 +143,19 @@ def _assemble(state: AgentState, summary: str) -> str:
     )
 
 
+def _branch_name(state: AgentState) -> str:
+    fe = state.get("detected_frontend_framework") or "app"
+    be = state.get("detected_backend_framework") or "api"
+    return re.sub(r"[^A-Za-z0-9._/-]", "-", f"agent/{fe}-{be}")
+
+
+def _pr_body(state: AgentState, document: str) -> str:
+    fe = state.get("detected_frontend_framework", "?")
+    be = state.get("detected_backend_framework", "?")
+    title = f"Generated {fe}/{be} project — {truncate(state.get('input', ''), 80)}"
+    return f"# {title}\n\n{document}"
+
+
 async def aggregator(state: AgentState) -> dict:
     summary = await complete(
         "aggregator",
@@ -149,9 +167,42 @@ async def aggregator(state: AgentState) -> dict:
     document = _assemble(state, summary)
     non_empty(document, "final_document")
 
+    messages = [
+        AIMessage(content="[aggregator] final document compiled", name="aggregator")
+    ]
+    branch_name = ""
+    pr_body = ""
+
+    # v2.5: commit the generated workspace to a branch; the doc becomes the PR body.
+    settings = get_settings()
+    workspace = state.get("workspace_dir", "")
+    if settings.enable_git and workspace and state.get("files"):
+        pr_body = _pr_body(state, document)
+        try:
+            (Path(workspace) / "PR_DESCRIPTION.md").write_text(pr_body, encoding="utf-8")
+        except OSError:
+            pass
+        branch_name = _branch_name(state)
+        n_files = len(state.get("files", []))
+        result = commit_workspace(
+            workspace,
+            branch_name,
+            f"feat: generate {state.get('detected_frontend_framework', 'app')}/"
+            f"{state.get('detected_backend_framework', 'api')} project ({n_files} files)",
+        )
+        status = (
+            f"ok {result['commit']}"
+            if result["committed"]
+            else f"skipped ({result['reason']})"
+        )
+        messages.append(
+            AIMessage(content=f"[aggregator] git commit on '{branch_name}': {status}",
+                      name="aggregator")
+        )
+
     return {
         "final_document": document,
-        "messages": [
-            AIMessage(content="[aggregator] final document compiled", name="aggregator")
-        ],
+        "branch_name": branch_name,
+        "pr_body": pr_body,
+        "messages": messages,
     }
